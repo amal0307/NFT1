@@ -3,7 +3,13 @@ import { useState, useEffect } from "react";
 import { uploadFileToIPFS, uploadJSONToIPFS } from "../pinata";
 import Marketplace from '../Marketplace.json';
 import { useLocation } from "react-router";
+import { createClient } from '@supabase/supabase-js';
 import { ethers } from "ethers";
+
+// Supabase client setup
+const supabaseUrl = 'https://njlndbldinkavmsdklby.supabase.co'; // Replace with your Supabase URL
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5qbG5kYmxkaW5rYXZtc2RrbGJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjM1MzA4NTYsImV4cCI6MjAzOTEwNjg1Nn0.L1xQepHWSdL8AE-Ep3VQPWFrF-Nh0OgBwYpyrderc3E'; // Replace with your Supabase Anon Key
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function SellNFT() {
     const [formParams, updateFormParams] = useState({ name: '', description: '', price: '' });
@@ -29,6 +35,7 @@ export default function SellNFT() {
     };
 
     useEffect(() => {
+        // Check if the user is already connected to MetaMask
         const checkIfWalletIsConnected = async () => {
             if (window.ethereum) {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
@@ -45,7 +52,6 @@ export default function SellNFT() {
         checkIfWalletIsConnected();
     }, []);
 
-    // This function uploads the NFT image to IPFS
     async function OnChangeFile(e) {
         const file = e.target.files[0];
         if (!file) {
@@ -73,7 +79,6 @@ export default function SellNFT() {
         }
     }
 
-    // This function uploads the metadata to IPFS
     async function uploadMetadataToIPFS() {
         const { name, description, price } = formParams;
         if (!name || !description || !price || !fileURL) {
@@ -103,23 +108,53 @@ export default function SellNFT() {
         }
     }
 
+    // Updated function to upload metadata to Supabase with error logging
+    async function uploadMetadataToSupabase(metadataURL) {
+        const { name, description, price } = formParams;
+
+        const { data, error } = await supabase
+            .from('charmachli') // Replace 'nfts' with your table name
+            .insert([
+                { name, description, price, image_url: metadataURL }
+            ]);
+
+        if (error) {
+            console.error("Error uploading to Supabase:", error.message); // Log the error message
+            updateMessage("Failed to upload metadata to Supabase: " + error.message); // Include the error in the UI message
+      npm start  
+        
+            return false;
+        }
+
+        console.log("Uploaded to Supabase:", data);
+        return true;
+    }
+
     async function listNFT(e) {
         e.preventDefault();
 
+        // Upload data to IPFS
         try {
             const metadataURL = await uploadMetadataToIPFS();
             if (metadataURL === -1) return;
 
+            // Upload metadata to Supabase
+            const supabaseUploadSuccess = await uploadMetadataToSupabase(metadataURL);
+            if (!supabaseUploadSuccess) return;
+
+            // Interact with the contract
             const provider = new ethers.providers.Web3Provider(window.ethereum);
             const signer = provider.getSigner();
             disableButton();
             updateMessage("Uploading NFT (this may take a few minutes)... Please don't click anything!");
 
             let contract = new ethers.Contract(Marketplace.address, Marketplace.abi, signer);
+
             const price = ethers.utils.parseUnits(formParams.price, 'ether');
             let listingPrice = await contract.getListPrice();
             listingPrice = listingPrice.toString();
 
+            // Create the NFT
             let transaction = await contract.createToken(metadataURL, price, { value: listingPrice });
             await transaction.wait();
 
@@ -205,3 +240,4 @@ export default function SellNFT() {
         </div>
     );
 }
+
